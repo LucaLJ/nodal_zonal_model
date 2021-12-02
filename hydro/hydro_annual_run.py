@@ -12,7 +12,7 @@ import pandas as pd
 import pyomo.environ as pe
 
 # %% Load  network
-path_52 = 'D:\\Python\\PyPSA\\Luca\\zonal_nodal_networks\\2018\\reduced_hydro\\zonal_reduced_02.nc'
+path_52 = 'D:\\Python\\PyPSA\\Luca\\zonal_nodal_networks\\2018\\reduced_hydro\\zonal_reduced_03_2018.nc'
 n52 = pypsa.Network(path_52)
 
 # dictionary that contains all hydro storages ordered by zone
@@ -75,7 +75,7 @@ for zone in hydro_dict:
 # need to add an extra line because I need the initial soc at t=0 which are the same as the final soc
 df_zone_soc.loc[0] = df_zone_soc.loc[52]
 df_zone_soc.sort_index(inplace=True)
-df_zone_soc.to_csv("D:\\Python\\PyPSA\\Luca\\data\\hydro\\hydro_weekly_sum_zone_04.csv", index=True)
+df_zone_soc.to_csv("D:\\Python\\PyPSA\\Luca\\data\\hydro\\2018\\hydro_weekly_sum_zone_04_2018.csv", index=True)
 # %% Export results in detail for all individual storage units
 
 df = pd.DataFrame()
@@ -84,7 +84,7 @@ df = n52.storage_units_t.state_of_charge
 # need to add an extra line because I need the initial soc at t=0 which are the same as the final soc
 df.loc[0] = df.loc[52]
 df.sort_index(inplace=True)
-df.to_csv('D:\\Python\\PyPSA\\Luca\\data\\hydro\\hydro_weekly_su_individual_const.csv', index=True)
+df.to_csv('D:\\Python\\PyPSA\\Luca\\data\\hydro\\2018\\hydro_weekly_su_individual_const_2018.csv', index=True)
 
 # %% export also network to
 # path_save = 'D:\\Python\\PyPSA\\Luca\\jupyter\\hydro\\hydro_model\\annual_network_hydro_solved_03.nc'
