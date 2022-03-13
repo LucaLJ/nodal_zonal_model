@@ -13,7 +13,7 @@ import sys
 import time
 import logging
 from multiprocessing_logging import install_mp_handler
-import config
+import parallel.config as config
 import pandas as pd
 import pypsa
 import math
@@ -28,38 +28,36 @@ class Inputs:
     def __init__(self, config):
         self.period_start = config.period_start
         self.period_end = config.period_end
-        self.no_weeks = config.weeks_sim
-        self.steps = self.no_weeks
+        self.steps = config.no_steps
         time_start = '{} 00:00:00'.format(self.period_start)
         time_end = '{} 23:00:00'.format(self.period_end)
         self.period = pd.date_range(start=time_start, end=time_end, freq='H')
         # WHAT tp dp with the remaining
-        self.timestep_length = int((len(self.period) / self.steps))
-        self.rest = len(self.period) - self.steps * self.timestep_length
+        self.window_size = int((len(self.period) / self.steps))
+        self.rest = len(self.period) - self.steps * self.window_size
         # load zonal network
         path_zone = config.path_zone
         self.n = pypsa.Network(path_zone)
 
         # read SOC values
         path_soc_hourly = config.path_soc_hourly
-        soc_in = pd.read_csv(path_soc_hourly)
-        soc_in = soc_in.set_index('snapshot')
-        soc_in.index = pd.to_datetime(soc_in.index)
+        self.soc_in = pd.read_csv(path_soc_hourly)
+        self.soc_in = self.soc_in.set_index('snapshot')
+        self.soc_in.index = pd.to_datetime(self.soc_in.index)
         # save SOC values in network soc_set
-        self.n.storage_units_t.state_of_charge_set = soc_in
+        self.n.storage_units_t.state_of_charge_set = self.soc_in
 
         # turn off cyclic soc
-        self.n.storage_units.cyclic_state_of_charge = True
+        self.n.storage_units.cyclic_state_of_charge = False
 
 
 # %%
 
 def run_lopf(step, input_data):
     # get the timespan according to the step number and the length of the whole period
-    ts_start = step * input_data.timestep_length
-    ts_end = (step + 1) * input_data.timestep_length
-    # I need this to set initial soc
-    last_previous_time = input_data.period[ts_start - 1]
+    ts_start = step * input_data.window_size
+    ts_end = (step + 1) * input_data.window_size
+
     # if there remains a rest of fractions of timesteps they are added to the last period
     ts_start = input_data.period[ts_start]
     if step == input_data.steps - 1:  # this is for the final step so that the 'rest' is added to the last period
@@ -77,18 +75,17 @@ def run_lopf(step, input_data):
     # set initial soc to value at the end of previous timestep
     input_data.n.storage_units.state_of_charge_initial = input_data.soc_in.loc[last_previous_time, :]
 
-    print(f'performing LOPF for step {step} from {ts_start} to {ts_end}')
+    logging.info(f'performing LOPF for step {step} from {ts_start} to {ts_end}')
+
     # commented out to run on own computer
     input_data.n.lopf(timespan, solver_name='gurobi')
-    # only if optimization successful assign ofv else infity
+    # only if optimization successful assign ofv else infinity
     try:
         ofv = input_data.n.objective
     except AttributeError:
-        print(f'LOPF for step {step} infeasible')
+        logging.info(f'LOPF for step {step} infeasible')
         ofv = math.inf
-    # ofv = step + 5
-    print(f'the objective function value for step {step} is {ofv}')
-    logging.warning(f'the objective function value for step {step} is {ofv}')
+    logging.info(f'the objective function value for step {step} is {ofv}')
     return ofv
 
 
@@ -102,40 +99,39 @@ def main():
     # change current working directory to the path where file is running
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     install_mp_handler()
-
+    logging.info("script has started")
     input_data = Inputs(config)
 
-    logging.info("script has started")
+    # this is to set the default inputs for run_lopf function otherwise cannot use map() properly
+    run_lopf_input = partial(run_lopf, input_data=input_data)
 
-    # # this is to set the default inputs for run_lopf function otherwise cannot use map() properly
-    # run_lopf_input = partial(run_lopf, input_data=input_data)
-    #
-    # results_list = []
-    #
-    # with concurrent.futures.ProcessPoolExecutor() as executor:
-    #     results = executor.map(run_lopf_input, range(input_data.no_weeks))
-    #
-    #     for result in results:
-    #         print(result)
-    #         results_list.append(result)
-    #
-    # # overall objective function value
-    # ofv_sum = sum(results_list)
-
-    # try with one step first
     results_list = []
-    result = run_lopf(3, input_data)
-    results_list.append(result)
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = executor.map(run_lopf_input, range(input_data.steps))
+
+        for result in results:
+            print(result)
+            results_list.append(result)
+
+    # # try with one step first
+    # results_list = []
+    # result = run_lopf(3, input_data)
+    # results_list.append(result)
 
     # output the results for objective function value
     print(results_list)
     results_df = pd.DataFrame(results_list)
+    results_df.to_csv(config.objective_path)
 
-    results_df.to_csv('ofv.csv')
-
+    # overall objective function value
+    ofv_sum = sum(results_list)
+    results_sum_save = config.save_obj_txt
+    with open(results_sum_save, 'w') as file:
+        file.write(str(ofv_sum))
     finish = time.perf_counter()
 
-    print(f'finished in {round(finish - start, 2)} second(s)')
+    logging.info(f'finished in {round(finish - start, 2)} second(s)')
 
 
 if __name__ == "__main__":

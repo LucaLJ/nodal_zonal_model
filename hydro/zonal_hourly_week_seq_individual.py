@@ -208,3 +208,36 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%
+import pypsa
+
+path = 'D:\Python\PyPSA\Luca\zonal_nodal_networks\\2018\\zonal_1024_costs2018.nc'
+n = pypsa.Network(path)
+
+#%%
+len(n.buses.country.unique())
+# %%
+n.storage_units.cyclic_state_of_charge = True
+n.storage_units.state_of_charge_initial = n.storage_units.p_nom * n.storage_units.max_hours
+
+# %%
+a = 5
+# a.to_csv('out.csv')
+with open('out.txt', 'w') as output:
+    output.write(str(a))
+
+# %% read csv target values
+import pandas as pd
+
+final_soc = pd.read_csv(
+    'D:\Python\PyPSA\Luca\\nodal_zonal_model\hydro\hpc_results\hydro_zonal\\52w\soc_zonal_final_1y.csv')
+# %% write to soc set
+
+df = pd.DataFrame(columns=n.storage_units.index,
+                  index=n.storage_units_t.state_of_charge_set.index)
+n.storage_units_t.state_of_charge_set = df
+n.storage_units_t.state_of_charge_set.iloc[-1,:] = final_soc.iloc[:,1]
+
+#%% solved network
+net = pypsa.Network('D:\Python\PyPSA\Luca\\nodal_zonal_model\hydro\hpc_results\hydro_zonal\\52w\zonal_1024_results_weekly_.nc')

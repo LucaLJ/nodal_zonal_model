@@ -374,6 +374,60 @@ def main():
         # at the end always pass on initial condition
         n.storage_units.state_of_charge_initial = n.storage_units_t.state_of_charge.loc[timespan[-1]]
 
+    # TODO: rerun 1st week with inputs from last week for initial and with set_soc values for end of the week
+    timestep = 0
+    ts_start = timestep * timestep_length
+    ts_end = (timestep + 1) * timestep_length
+    ts_start = period[ts_start]
+    ts_end = period[ts_end - 1]  # without the -1 the time slices overlap; then I can set the initial soc in soc_set
+    timespan = pd.date_range(start=ts_start, end=ts_end, freq='H')
+
+    # initial soc already set in last iteration above to final values in last week
+    # set soc_set at the end of the week to the previously determined values at the end of week1
+    # first fill soc_set dataframe with nan values
+    n.storage_units_t.state_of_charge_set[list(n.storage_units.index)] = np.nan
+    n.storage_units_t.state_of_charge_set.loc[timespan[-1],:] = n.storage_units_t.state_of_charge.loc[timespan[-1],:]
+
+    # extra functionality set of constraints ONLY for nodal model i.e. the NTC constraints
+    def only_nodal_model(network, snapshots):
+        model = network.model
+
+        ### constraint for NTC for nodal model
+        f_ntc = config.f_ntc
+
+        # introduce new slack variable for ntc soft constraints v0 for + and v1 for -
+        model.v0 = pe.Var(list(ntc.index), list(snapshots), domain=pe.NonNegativeReals)
+        model.v1 = pe.Var(list(ntc.index), list(snapshots), domain=pe.NonNegativeReals)
+
+        # objective contributions:
+        ntc_violation_pos = sum(f_ntc * model.v0[line, sn] for line in ntc.index for sn in snapshots)
+        ntc_violation_neg = sum(f_ntc * model.v1[line, sn] for line in ntc.index for sn in snapshots)
+
+        model.objective.expr += ntc_violation_pos + ntc_violation_neg
+
+        # loop through NTCs and LInks and find which ones
+        def constr_NTC_pos(model, ntc_border, sn):
+            if not ntc_lines[ntc_border] and not ntc_links[ntc_border]:
+                return pe.Constraint.Skip
+            line_sum = sum(
+                model.passive_branch_p['Line', line[0], sn] * line[1] for line in ntc_lines[ntc_border])
+            link_sum = sum(model.link_p[link[0], sn] * link[1] for link in ntc_links[ntc_border])
+            return link_sum + line_sum - ntc.loc[ntc_border, 'NTC_2020'] <= model.v0[ntc_border, sn]
+
+        def constr_NTC_neg(model, ntc_border, sn):
+            if not ntc_lines[ntc_border] and not ntc_links[ntc_border]:
+                return pe.Constraint.Skip
+            line_sum = sum(
+                model.passive_branch_p['Line', line[0], sn] * line[1] for line in ntc_lines[ntc_border])
+            link_sum = sum(model.link_p[link[0], sn] * link[1] for link in ntc_links[ntc_border])
+            return -(ntc.loc[ntc_border, 'back'] + link_sum + line_sum) <= model.v1[ntc_border, sn]
+
+        model.new_constraint5 = pe.Constraint(list(ntc.index), list(snapshots), rule=constr_NTC_pos)
+        model.new_constraint6 = pe.Constraint(list(ntc.index), list(snapshots), rule=constr_NTC_neg)
+
+    print("perform opf for week {} ranging from {} to {}".format(timestep, timespan[0], timespan[-1]))
+    n.lopf(snapshots=timespan, solver_name='gurobi', extra_functionality=only_nodal_model)
+
     # %% save results
     # save_path_zone = 'D:\\Python\\PyPSA\\Luca\\jupyter\\hydro\\hydro_model\\zonal_1024_results_1y_weekly_02.nc'
     # n.export_to_netcdf(save_path_zone)

@@ -50,4 +50,3 @@ def lines_ntc(ntc,network,line_link):
     return ntc_lines
 
 
- 37697956.16577347
